@@ -10,35 +10,30 @@ import re
 
 st.set_page_config(page_title="AI vs Real Image Detection", layout="wide")
 
-st.title("🧠 AI vs Real Image Detection")
-st.write("Upload an image and get the result via Email.")
+st.title("🧠 AI vs Real Image Detection with Email")
 
 # -----------------------------
-# Load AI Detection Model
+# Load AI Model
 # -----------------------------
 @st.cache_resource
 def load_model():
-    detector = pipeline(
-        "image-classification",
-        model="umm-maybe/AI-image-detector"
-    )
-    return detector
+    return pipeline("image-classification",
+                    model="umm-maybe/AI-image-detector")
 
 detector = load_model()
 
 # -----------------------------
-# Email Validation Function
+# Email Validation
 # -----------------------------
 def is_valid_email(email):
     pattern = r"^[\w\.-]+@[\w\.-]+\.\w+$"
     return re.match(pattern, email)
 
 # -----------------------------
-# Email Sending Function
+# Send Email Function
 # -----------------------------
-def send_email_result(receiver_email, result_label, confidence):
+def send_email(sender_email, receiver_email, result_label, confidence):
 
-    sender_email = st.secrets["EMAIL"]
     sender_password = st.secrets["APP_PASSWORD"]
 
     subject = "AI Image Detection Result"
@@ -72,58 +67,35 @@ Thank you for using the AI Detection App.
         return False
 
 # -----------------------------
-# Session History
+# UI Inputs
 # -----------------------------
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-# Email Input Field (Dynamic Receiver)
-receiver_email = st.text_input("📧 Enter Email to Receive Result")
+sender_email = st.text_input("📤 Enter Sender Gmail")
+receiver_email = st.text_input("📥 Enter Receiver Email")
 
 uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
 
-if uploaded_file is not None and receiver_email:
-
-    if not is_valid_email(receiver_email):
-        st.error("❌ Please enter a valid email address.")
-    else:
-        image = Image.open(uploaded_file).convert("RGB")
-        st.image(image, caption="Uploaded Image", use_column_width=True)
-
-        result = detector(image)
-        label = result[0]["label"]
-        confidence = result[0]["score"]
-
-        st.subheader("Prediction Result")
-        st.write(f"**Result:** {label}")
-        st.write(f"**Confidence:** {confidence*100:.2f}%")
-
-        # Send Email
-        if send_email_result(receiver_email, label, confidence):
-            st.success("📧 Result sent successfully!")
-
-        # Save history
-        st.session_state.history.append({
-            "Filename": uploaded_file.name,
-            "Prediction": label,
-            "Confidence (%)": round(confidence*100, 2),
-            "Sent To": receiver_email
-        })
-
 # -----------------------------
-# Filter Section
+# Prediction Section
 # -----------------------------
-if st.session_state.history:
-    st.subheader("📊 Prediction History")
+if uploaded_file is not None:
+    image = Image.open(uploaded_file).convert("RGB")
+    st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    df = pd.DataFrame(st.session_state.history)
+    result = detector(image)
+    label = result[0]["label"]
+    confidence = result[0]["score"]
 
-    filter_option = st.selectbox(
-        "Filter Results",
-        ["All"] + list(df["Prediction"].unique())
-    )
+    st.subheader("Prediction Result")
+    st.write(f"**Result:** {label}")
+    st.write(f"**Confidence:** {confidence*100:.2f}%")
 
-    if filter_option != "All":
-        df = df[df["Prediction"] == filter_option]
+    # SEND BUTTON
+    if st.button("📧 Send Result via Email"):
 
-    st.dataframe(df, use_container_width=True)
+        if not sender_email or not receiver_email:
+            st.error("Please enter both sender and receiver emails.")
+        elif not is_valid_email(sender_email) or not is_valid_email(receiver_email):
+            st.error("Enter valid email addresses.")
+        else:
+            if send_email(sender_email, receiver_email, label, confidence):
+                st.success("✅ Email sent successfully!")
