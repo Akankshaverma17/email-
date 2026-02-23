@@ -1,7 +1,6 @@
 import streamlit as st
 from transformers import pipeline
 from PIL import Image
-import pandas as pd
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -17,8 +16,10 @@ st.title("🧠 AI vs Real Image Detection with Email")
 # -----------------------------
 @st.cache_resource
 def load_model():
-    return pipeline("image-classification",
-                    model="umm-maybe/AI-image-detector")
+    return pipeline(
+        "image-classification",
+        model="umm-maybe/AI-image-detector"
+    )
 
 detector = load_model()
 
@@ -45,8 +46,6 @@ AI Image Detection Result
 Result: {result_label}
 Confidence: {confidence*100:.2f}%
 Time: {time_now}
-
-Thank you for using the AI Detection App.
 """
 
     msg = MIMEMultipart()
@@ -55,28 +54,29 @@ Thank you for using the AI Detection App.
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain"))
 
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(sender_email, sender_password)
-        server.sendmail(sender_email, receiver_email, msg.as_string())
-        server.quit()
-        return True
-    except Exception as e:
-        st.error(f"Email Error: {e}")
-        return False
+    server = smtplib.SMTP("smtp.gmail.com", 587)
+    server.starttls()
+    server.login(sender_email, sender_password)
+    server.sendmail(sender_email, receiver_email, msg.as_string())
+    server.quit()
 
 # -----------------------------
-# UI Inputs
+# UI SECTION (Always Visible)
 # -----------------------------
-sender_email = st.text_input("📤 Enter Sender Gmail")
-receiver_email = st.text_input("📥 Enter Receiver Email")
+st.subheader("📧 Email Settings")
+
+sender_email = st.text_input("Sender Gmail Address")
+receiver_email = st.text_input("Receiver Email Address")
+
+st.subheader("🖼 Upload Image")
 
 uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
 
 # -----------------------------
 # Prediction Section
 # -----------------------------
+prediction_done = False
+
 if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
     st.image(image, caption="Uploaded Image", use_column_width=True)
@@ -85,17 +85,26 @@ if uploaded_file is not None:
     label = result[0]["label"]
     confidence = result[0]["score"]
 
-    st.subheader("Prediction Result")
-    st.write(f"**Result:** {label}")
-    st.write(f"**Confidence:** {confidence*100:.2f}%")
+    st.subheader("🔍 Prediction Result")
+    st.write(f"Result: {label}")
+    st.write(f"Confidence: {confidence*100:.2f}%")
 
-    # SEND BUTTON
-    if st.button("📧 Send Result via Email"):
+    prediction_done = True
 
-        if not sender_email or not receiver_email:
-            st.error("Please enter both sender and receiver emails.")
-        elif not is_valid_email(sender_email) or not is_valid_email(receiver_email):
-            st.error("Enter valid email addresses.")
-        else:
-            if send_email(sender_email, receiver_email, label, confidence):
-                st.success("✅ Email sent successfully!")
+# -----------------------------
+# Send Button (Always Visible)
+# -----------------------------
+if st.button("📨 Send Result via Email"):
+
+    if not prediction_done:
+        st.error("Please upload and predict an image first.")
+    elif not sender_email or not receiver_email:
+        st.error("Please enter both email addresses.")
+    elif not is_valid_email(sender_email) or not is_valid_email(receiver_email):
+        st.error("Enter valid email addresses.")
+    else:
+        try:
+            send_email(sender_email, receiver_email, label, confidence)
+            st.success("✅ Email sent successfully!")
+        except Exception as e:
+            st.error(f"Error sending email: {e}")
