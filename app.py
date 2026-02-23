@@ -1,77 +1,129 @@
 import streamlit as st
+from transformers import pipeline
+from PIL import Image
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.pipeline import Pipeline
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import datetime
+import re
 
-st.set_page_config(page_title="Spam Email Detection", layout="wide")
+st.set_page_config(page_title="AI vs Real Image Detection", layout="wide")
 
-st.title("📧 Spam Email Detection App")
+st.title("🧠 AI vs Real Image Detection")
+st.write("Upload an image and get the result via Email.")
 
-uploaded_file = st.file_uploader("Upload your email dataset (CSV)", type=["csv"])
+# -----------------------------
+# Load AI Detection Model
+# -----------------------------
+@st.cache_resource
+def load_model():
+    detector = pipeline(
+        "image-classification",
+        model="umm-maybe/AI-image-detector"
+    )
+    return detector
 
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
+detector = load_model()
 
-    st.subheader("📊 Dataset Preview")
-    st.dataframe(df.head())
+# -----------------------------
+# Email Validation Function
+# -----------------------------
+def is_valid_email(email):
+    pattern = r"^[\w\.-]+@[\w\.-]+\.\w+$"
+    return re.match(pattern, email)
 
-    required_cols = {"subject", "body", "label"}
-    if not required_cols.issubset(df.columns):
-        st.error("Dataset must contain subject, body, and label columns")
+# -----------------------------
+# Email Sending Function
+# -----------------------------
+def send_email_result(receiver_email, result_label, confidence):
+
+    sender_email = st.secrets["EMAIL"]
+    sender_password = st.secrets["APP_PASSWORD"]
+
+    subject = "AI Image Detection Result"
+    time_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    body = f"""
+AI Image Detection Result
+
+Result: {result_label}
+Confidence: {confidence*100:.2f}%
+Time: {time_now}
+
+Thank you for using the AI Detection App.
+"""
+
+    msg = MIMEMultipart()
+    msg["From"] = sender_email
+    msg["To"] = receiver_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, receiver_email, msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        st.error(f"Email Error: {e}")
+        return False
+
+# -----------------------------
+# Session History
+# -----------------------------
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+# Email Input Field (Dynamic Receiver)
+receiver_email = st.text_input("📧 Enter Email to Receive Result")
+
+uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
+
+if uploaded_file is not None and receiver_email:
+
+    if not is_valid_email(receiver_email):
+        st.error("❌ Please enter a valid email address.")
     else:
-        # Combine subject + body
-        df["text"] = df["subject"] + " " + df["body"]
+        image = Image.open(uploaded_file).convert("RGB")
+        st.image(image, caption="Uploaded Image", use_column_width=True)
 
-        X = df["text"]
-        y = df["label"]
+        result = detector(image)
+        label = result[0]["label"]
+        confidence = result[0]["score"]
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42
-        )
+        st.subheader("Prediction Result")
+        st.write(f"**Result:** {label}")
+        st.write(f"**Confidence:** {confidence*100:.2f}%")
 
-        model = Pipeline([
-            ("tfidf", TfidfVectorizer(stop_words="english")),
-            ("clf", MultinomialNB())
-        ])
+        # Send Email
+        if send_email_result(receiver_email, label, confidence):
+            st.success("📧 Result sent successfully!")
 
-        model.fit(X_train, y_train)
+        # Save history
+        st.session_state.history.append({
+            "Filename": uploaded_file.name,
+            "Prediction": label,
+            "Confidence (%)": round(confidence*100, 2),
+            "Sent To": receiver_email
+        })
 
-        accuracy = model.score(X_test, y_test)
-        st.success(f"✅ Model Accuracy: {accuracy:.2f}")
+# -----------------------------
+# Filter Section
+# -----------------------------
+if st.session_state.history:
+    st.subheader("📊 Prediction History")
 
-        df["prediction"] = model.predict(X)
+    df = pd.DataFrame(st.session_state.history)
 
-        st.subheader("🔍 Filter Emails")
+    filter_option = st.selectbox(
+        "Filter Results",
+        ["All"] + list(df["Prediction"].unique())
+    )
 
-        filter_option = st.selectbox(
-            "Select emails to view:",
-            ["All", "Spam", "Not Spam"]
-        )
+    if filter_option != "All":
+        df = df[df["Prediction"] == filter_option]
 
-        if filter_option == "Spam":
-            filtered_df = df[df["prediction"] == "spam"]
-        elif filter_option == "Not Spam":
-            filtered_df = df[df["prediction"] == "ham"]
-        else:
-            filtered_df = df
-
-        st.dataframe(
-            filtered_df[["email_id", "subject", "prediction"]],
-            use_container_width=True
-        )
-
-        st.subheader("✉️ Test a New Email")
-
-        user_subject = st.text_input("Email Subject")
-        user_body = st.text_area("Email Body")
-
-        if st.button("Check Spam"):
-            user_text = user_subject + " " + user_body
-            result = model.predict([user_text])[0]
-
-            if result == "spam":
-                st.error("🚨 This email is SPAM")
-            else:
-                st.success("✅ This email is NOT spam")
+    st.dataframe(df, use_container_width=True)
